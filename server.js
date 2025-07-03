@@ -1,76 +1,38 @@
 require('dotenv').config();
 const express = require('express');
-const app = express();
-//BD
 const mongoose = require('mongoose');
-//swagger
-const swaggerDocs = require('./swagger');
-//S3
 const AWS = require('aws-sdk');
-
-//Log
+const multer = require('multer');
 const { logInfo, logError } = require('./logger');
+const swaggerDocs = require('./swagger');
+const mysql = require('mysql2/promise');
 
+const app = express();
 app.use(express.json());
 
 /**
-* @swagger
-* tags:
-*   - name: CRUD MongoDb
-*     description: Operações de CRUD para usuários no MongoDb.
-*   - name: Buckets
-*     description: Operações de Listar buckets, upload e remoção de arquivo para um bucket S3.
-*/
+ * @swagger
+ * tags:
+ *   - name: CRUD MongoDb
+ *     description: Operações de CRUD para usuários no MongoDb.
+ *   - name: Buckets
+ *     description: Operações com Buckets S3.
+ *   - name: Produtos
+ *     description: CRUD para produtos no MySQL
+ */
 
-
-//#region CRUD MongoDb
+//#region MongoDB
 mongoose.connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
 }).then(() => logInfo('MongoDB conectado', null))
-    .catch(err => logError('Erro ao logar mongodb' + err, null, err));
+  .catch(err => logError('Erro ao conectar MongoDB: ' + err, null, err));
 
 const UserSchema = new mongoose.Schema({
-    nome: String,
-    email: String
+  nome: String,
+  email: String,
 });
-
 const User = mongoose.model('Usuario', UserSchema);
-
-/**
- * @swagger
- * /mongodb/testar-conexao:
- *   get:
- *     tags:
- *       - CRUD MongoDb
- *     summary: Testa a conexão com o MongoDB
- *     description: Verifica se a aplicação consegue se conectar ao MongoDB.
- *     responses:
- *       200:
- *         description: Conexão bem-sucedida
- *       500:
- *         description: Erro na conexão com o MongoDB
- */
-app.get('/mongodb/testar-conexao', async (req, res) => {
-    try {
-        //Tentando conectar ao MongoDB
-        await mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
-        const user = await User.findOne(); //Consulta simples (primeiro usuário encontrado)
-
-        logInfo('Conexão com o MongoDB efetuada com sucesso', req);
-
-        if (user) {
-            res.status(200).send('Conexão com o MongoDB bem-sucedida e usuário encontrado!');
-        } else {
-            res.status(200).send('Conexão com o MongoDB bem-sucedida, mas nenhum usuário encontrado.');
-        }
-    } catch (error) {
-        await logError('Erro ao conectar no MongoDb' + error, req, error);
-        res.status(500).send('Erro na conexão com o MongoDB');
-    } finally {
-        mongoose.connection.close();
-    }
-});
 
 /**
  * @swagger
@@ -79,7 +41,6 @@ app.get('/mongodb/testar-conexao', async (req, res) => {
  *     tags:
  *       - CRUD MongoDb
  *     summary: Criar um novo usuário
- *     description: Este endpoint cria um novo usuário no sistema.
  *     requestBody:
  *       required: true
  *       content:
@@ -87,43 +48,29 @@ app.get('/mongodb/testar-conexao', async (req, res) => {
  *           schema:
  *             type: object
  *             properties:
- *               name:
+ *               nome:
  *                 type: string
- *                 description: Nome do usuário
  *               email:
  *                 type: string
- *                 description: Email do usuário
  *             required:
- *               - name
+ *               - nome
  *               - email
  *     responses:
  *       201:
  *         description: Usuário criado com sucesso.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                   description: ID do usuário
- *                 name:
- *                   type: string
- *                 email:
- *                   type: string
- *       400:
- *         description: Requisição inválida.
+ *       500:
+ *         description: Erro interno
  */
 app.post('/usuarios', async (req, res) => {
-    try {
-        const user = new User(req.body);
-        await user.save();
-        logInfo('Usuário criado', req);
-        res.status(201).send(user);
-    } catch (error) {
-        logError("Erro ao criar usuário", req, error);
-        res.status(500).send('Ocorreu um erro interno');
-    }
+  try {
+    const user = new User(req.body);
+    await user.save();
+    logInfo('Usuário criado', req, user);
+    res.status(201).send(user);
+  } catch (error) {
+    logError('Erro ao criar usuário', req, error);
+    res.status(500).send('Erro interno');
+  }
 });
 
 /**
@@ -133,34 +80,19 @@ app.post('/usuarios', async (req, res) => {
  *     tags:
  *       - CRUD MongoDb
  *     summary: Listar todos os usuários
- *     description: Este endpoint retorna todos os usuários cadastrados no sistema.
  *     responses:
  *       200:
  *         description: Lista de usuários
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   _id:
- *                     type: string
- *                   nome:
- *                     type: string
- *                   email:
- *                     type: string
  */
 app.get('/usuarios', async (req, res) => {
-    try {
-        const users = await User.find();
-        logInfo('Usuários encontrados', req, users);
-        res.send(users);
-    } catch (error) {
-        logError("Erro ao buscar usuários", req, error);
-        res.status(500).send('Ocorreu um erro interno');
-    }
-
+  try {
+    const users = await User.find();
+    logInfo('Usuários listados', req, users);
+    res.send(users);
+  } catch (error) {
+    logError('Erro ao buscar usuários', req, error);
+    res.status(500).send('Erro interno');
+  }
 });
 
 /**
@@ -169,44 +101,29 @@ app.get('/usuarios', async (req, res) => {
  *   get:
  *     tags:
  *       - CRUD MongoDb
- *     summary: Obter um usuário específico
- *     description: Este endpoint retorna um usuário baseado no ID fornecido.
+ *     summary: Obter um usuário por ID
  *     parameters:
- *       - name: id
- *         in: path
+ *       - in: path
+ *         name: id
  *         required: true
- *         description: ID do usuário
  *         schema:
  *           type: string
  *     responses:
  *       200:
  *         description: Usuário encontrado
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                 nome:
- *                   type: string
- *                 email:
- *                   type: string
  *       404:
- *         description: Usuário não encontrado.
+ *         description: Usuário não encontrado
  */
 app.get('/usuarios/:id', async (req, res) => {
-    try {
-        const user = await User.findById(req.params.id);
-        if (!user) return res.status(404).send('Usuário não encontrado');
-
-        logInfo('Usuário encontrado', req, user);
-        res.send(user);
-    } catch (error) {
-        logError("Erro ao buscar usuário", req, error);
-        res.status(500).send('Ocorreu um erro interno');
-    }
-
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).send('Usuário não encontrado');
+    logInfo('Usuário encontrado', req, user);
+    res.send(user);
+  } catch (error) {
+    logError('Erro ao buscar usuário', req, error);
+    res.status(500).send('Erro interno');
+  }
 });
 
 /**
@@ -215,13 +132,11 @@ app.get('/usuarios/:id', async (req, res) => {
  *   put:
  *     tags:
  *       - CRUD MongoDb
- *     summary: Atualizar um usuário específico
- *     description: Este endpoint atualiza um usuário baseado no ID fornecido.
+ *     summary: Atualizar um usuário
  *     parameters:
- *       - name: id
- *         in: path
+ *       - in: path
+ *         name: id
  *         required: true
- *         description: ID do usuário
  *         schema:
  *           type: string
  *     requestBody:
@@ -238,31 +153,19 @@ app.get('/usuarios/:id', async (req, res) => {
  *     responses:
  *       200:
  *         description: Usuário atualizado
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                 nome:
- *                   type: string
- *                 email:
- *                   type: string
  *       404:
- *         description: Usuário não encontrado.
+ *         description: Usuário não encontrado
  */
 app.put('/usuarios/:id', async (req, res) => {
-    try {
-        const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true });
-        if (!user) return res.status(404).send('Usuário não encontrado');
-
-        logInfo('Usuário atualizado', req, user);
-        res.send(user);
-    } catch (error) {
-        logError("Erro ao atualizar usuário", req, error);
-        res.status(500).send('Ocorreu um erro interno');
-    }
+  try {
+    const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!user) return res.status(404).send('Usuário não encontrado');
+    logInfo('Usuário atualizado', req, user);
+    res.send(user);
+  } catch (error) {
+    logError('Erro ao atualizar usuário', req, error);
+    res.status(500).send('Erro interno');
+  }
 });
 
 /**
@@ -271,125 +174,222 @@ app.put('/usuarios/:id', async (req, res) => {
  *   delete:
  *     tags:
  *       - CRUD MongoDb
- *     summary: Remover um usuário específico
- *     description: Este endpoint remove um usuário baseado no ID fornecido.
+ *     summary: Deletar um usuário
  *     parameters:
- *       - name: id
- *         in: path
+ *       - in: path
+ *         name: id
  *         required: true
- *         description: ID do usuário
  *         schema:
  *           type: string
  *     responses:
  *       200:
- *         description: Usuário removido
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 _id:
- *                   type: string
- *                 nome:
- *                   type: string
- *                 email:
- *                   type: string
+ *         description: Usuário deletado
  *       404:
- *         description: Usuário não encontrado.
+ *         description: Usuário não encontrado
  */
 app.delete('/usuarios/:id', async (req, res) => {
-    try {
-        const result = await User.deleteOne({ _id: req.params.id });
-        if (result.deletedCount === 0) {
-            return res.status(404).send('Usuário não encontrado');
-        }
-
-        logInfo('Usuário removido', req);
-        res.send({ message: 'Usuário removido com sucesso' });
-    } catch (error) {
-        logError("Erro ao remover usuário", req, error)
-        res.status(500).send('Ocorreu um erro interno');
-    }
-
+  try {
+    const result = await User.deleteOne({ _id: req.params.id });
+    if (result.deletedCount === 0) return res.status(404).send('Usuário não encontrado');
+    logInfo('Usuário removido', req);
+    res.send({ message: 'Usuário removido com sucesso' });
+  } catch (error) {
+    logError('Erro ao remover usuário', req, error);
+    res.status(500).send('Erro interno');
+  }
 });
+//#endregion
+
+//#region MySQL (CRUD Produtos)
+
+const pool = mysql.createPool({
+  host: process.env.MYSQL_HOST,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DATABASE,
+  port: process.env.MYSQL_PORT || 3306,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+/**
+ * @swagger
+ * /produtos:
+ *   post:
+ *     tags:
+ *       - Produtos
+ *     summary: Criar um novo produto
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nome:
+ *                 type: string
+ *               preco:
+ *                 type: number
+ *             required:
+ *               - nome
+ *               - preco
+ *     responses:
+ *       201:
+ *         description: Produto criado com sucesso.
+ *       500:
+ *         description: Erro interno
+ */
+app.post('/produtos', async (req, res) => {
+  try {
+    const { nome, preco } = req.body;
+    const [result] = await pool.query('INSERT INTO produtos (nome, preco) VALUES (?, ?)', [nome, preco]);
+    res.status(201).json({ id: result.insertId, nome, preco });
+  } catch (error) {
+    logError('Erro ao criar produto', req, error);
+    res.status(500).send('Erro ao criar produto');
+  }
+});
+
+/**
+ * @swagger
+ * /produtos:
+ *   get:
+ *     tags:
+ *       - Produtos
+ *     summary: Listar todos os produtos
+ *     responses:
+ *       200:
+ *         description: Lista de produtos
+ */
+app.get('/produtos', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM produtos');
+    res.json(rows);
+  } catch (error) {
+    logError('Erro ao listar produtos', req, error);
+    res.status(500).send('Erro ao listar produtos');
+  }
+});
+
+/**
+ * @swagger
+ * /produtos/{id}:
+ *   put:
+ *     tags:
+ *       - Produtos
+ *     summary: Atualizar um produto
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nome:
+ *                 type: string
+ *               preco:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Produto atualizado
+ *       404:
+ *         description: Produto não encontrado
+ */
+app.put('/produtos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nome, preco } = req.body;
+    const [result] = await pool.query('UPDATE produtos SET nome = ?, preco = ? WHERE id = ?', [nome, preco, id]);
+    if (result.affectedRows === 0) return res.status(404).send('Produto não encontrado');
+    res.send({ id, nome, preco });
+  } catch (error) {
+    logError('Erro ao atualizar produto', req, error);
+    res.status(500).send('Erro ao atualizar produto');
+  }
+});
+
+/**
+ * @swagger
+ * /produtos/{id}:
+ *   delete:
+ *     tags:
+ *       - Produtos
+ *     summary: Deletar um produto
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Produto deletado
+ *       404:
+ *         description: Produto não encontrado
+ */
+app.delete('/produtos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [result] = await pool.query('DELETE FROM produtos WHERE id = ?', [id]);
+    if (result.affectedRows === 0) return res.status(404).send('Produto não encontrado');
+    res.send({ message: 'Produto removido com sucesso' });
+  } catch (error) {
+    logError('Erro ao deletar produto', req, error);
+    res.status(500).send('Erro ao deletar produto');
+  }
+});
+
 //#endregion
 
 //#region S3
 AWS.config.update({
-    accessKeyId: process.env.ACCESS_KEY_ID,
-    secretAccessKey: process.env.SECRET_ACCESS_KEY,
-    region: process.env.REGION,
-    sessionToken: process.env.SESSION_TOKEN,
+  accessKeyId: process.env.ACCESS_KEY_ID,
+  secretAccessKey: process.env.SECRET_ACCESS_KEY,
+  region: process.env.REGION,
+  sessionToken: process.env.SESSION_TOKEN,
 });
-
 const s3 = new AWS.S3();
+const upload = multer({ storage: multer.memoryStorage() });
 
 /**
  * @swagger
  * /buckets:
  *   get:
- *     summary: Lista todos os buckets
- *     tags: 
+ *     tags:
  *       - Buckets
- *     responses:
- *       200:
- *         description: Lista de todos os buckets
+ *     summary: Listar buckets S3
  */
 app.get('/buckets', async (req, res) => {
-    try {
-        const data = await s3.listBuckets().promise();
-        logInfo('Buckets encontrados', req, data.Buckets);
-        res.status(200).json(data.Buckets);
-    } catch (error) {
-        logError("Erro ao buscar buckets", req, error);
-        res.status(500).json({ error: 'Erro ao listar buckets', details: error });
-    }
-});
-
-/**
- * @swagger
- * /buckets/{bucketName}:
- *   get:
- *     summary: Lista os objetos de um bucket
- *     tags: 
- *       - Buckets
- *     parameters:
- *       - in: path
- *         name: bucketName
- *         required: true
- *         description: Nome do bucket
- *     responses:
- *       200:
- *         description: Lista dos objetos do bucket
- */
-app.get('/buckets/:bucketName', async (req, res) => {
-    const { bucketName } = req.params;
-    const params = {
-        Bucket: bucketName,
-    };
-
-    try {
-        const data = await s3.listObjectsV2(params).promise();
-        logInfo('Objetos encontrados', req, data.Contents);
-        res.status(200).json(data.Contents);
-    } catch (error) {
-        logError("Erro ao buscar objetos", req, error);
-        res.status(500).json({ error: 'Erro ao listar objetos do bucket', details: error });
-    }
+  try {
+    const data = await s3.listBuckets().promise();
+    logInfo('Buckets listados', req, data.Buckets);
+    res.json(data.Buckets);
+  } catch (error) {
+    logError('Erro ao listar buckets', req, error);
+    res.status(500).send('Erro ao listar buckets');
+  }
 });
 
 /**
  * @swagger
  * /buckets/{bucketName}/upload:
  *   post:
- *     summary: Faz o upload de um arquivo para um bucket
- *     tags: 
+ *     tags:
  *       - Buckets
+ *     summary: Upload de arquivo para bucket
  *     parameters:
  *       - in: path
  *         name: bucketName
  *         required: true
- *         description: Nome do bucket
+ *         schema:
+ *           type: string
  *     requestBody:
  *       required: true
  *       content:
@@ -404,44 +404,115 @@ app.get('/buckets/:bucketName', async (req, res) => {
  *       200:
  *         description: Arquivo enviado com sucesso
  */
-//Utilizar alguma lib para fazer o upload/strem de arquivos, sugestão: multer
-app.post('/buckets/:bucketName/upload', async (req, res) => {
-    try {
-        logInfo('Upload efetuado', req, data.Buckets);
-    } catch (error) {
-        logError("Erro ao efetuar upload", req, error);
-    }
+app.post('/buckets/:bucketName/upload', upload.single('file'), async (req, res) => {
+  const { bucketName } = req.params;
+  const file = req.file;
+
+  if (!file) {
+    logError('Arquivo não enviado', req);
+    return res.status(400).send('Nenhum arquivo enviado.');
+  }
+
+  const params = {
+    Bucket: bucketName,
+    Key: file.originalname,
+    Body: file.buffer,
+  };
+
+  try {
+    const result = await s3.upload(params).promise();
+    logInfo('Upload efetuado', req, result);
+    res.status(200).json({ message: 'Arquivo enviado com sucesso!', result });
+  } catch (error) {
+    logError('Erro ao efetuar upload', req, error);
+    res.status(500).json({ error: 'Erro ao enviar arquivo', details: error });
+  }
 });
 
 /**
  * @swagger
  * /buckets/{bucketName}/file/{fileName}:
  *   delete:
- *     summary: Deleta um arquivo específico de um bucket
- *     tags: 
+ *     tags:
  *       - Buckets
+ *     summary: Deletar arquivo de bucket
  *     parameters:
  *       - in: path
  *         name: bucketName
  *         required: true
- *         description: Nome do bucket
+ *         schema:
+ *           type: string
  *       - in: path
  *         name: fileName
  *         required: true
- *         description: Nome do arquivo a ser deletado
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
  *         description: Arquivo deletado com sucesso
  */
 app.delete('/buckets/:bucketName/file/:fileName', async (req, res) => {
-    try {
-        logInfo('Objeto removido', req, data.Buckets);
-    } catch (error) {
-        logError("Erro ao remover objeto", req, error);
-    }
+  const { bucketName, fileName } = req.params;
+
+  const params = {
+    Bucket: bucketName,
+    Key: fileName,
+  };
+
+  try {
+    await s3.deleteObject(params).promise();
+    logInfo('Objeto removido', req, { bucketName, fileName });
+    res.status(200).json({ message: 'Arquivo deletado com sucesso' });
+  } catch (error) {
+    logError('Erro ao remover objeto', req, error);
+    res.status(500).json({ error: 'Erro ao deletar arquivo', details: error });
+  }
+});
+
+/**
+ * @swagger
+ * /buckets/replicar/{fileName}:
+ *   post:
+ *     tags:
+ *       - Buckets
+ *     summary: Replicar arquivo de bucket principal para secundário
+ *     parameters:
+ *       - in: path
+ *         name: fileName
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Arquivo replicado com sucesso
+ */
+app.post('/buckets/replicar/:fileName', async (req, res) => {
+  const sourceBucket = `${process.env.RA}-dsm-vot-prod`;
+  const destinationBucket = `${process.env.RA}-dsm-vot-hml`;
+  const { fileName } = req.params;
+
+  try {
+    const file = await s3.getObject({ Bucket: sourceBucket, Key: fileName }).promise();
+    const result = await s3.upload({
+      Bucket: destinationBucket,
+      Key: fileName,
+      Body: file.Body,
+    }).promise();
+
+    logInfo('Arquivo replicado com sucesso', req, result);
+    res.status(200).json({ message: 'Arquivo replicado com sucesso', result });
+  } catch (error) {
+    logError('Erro ao replicar arquivo', req, error);
+    res.status(500).json({ error: 'Erro ao replicar arquivo', details: error });
+  }
 });
 //#endregion
 
-
+// Inicializa o Swagger (depois de todas as rotas)
 swaggerDocs(app);
-app.listen(3000, () => console.log('Servidor rodando na porta 3000'));
+
+// Start server
+app.listen(3000, () => {
+  console.log('Servidor rodando em http://localhost:3000');
+  console.log('Swagger disponível em http://localhost:3000/swagger');
+});
