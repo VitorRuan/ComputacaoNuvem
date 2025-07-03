@@ -1,23 +1,29 @@
 const swaggerJSDoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
+const path = require('path');
 
 const options = {
-    definition: {
-        openapi: '3.0.0',
-        info: {
-            title: 'API AWS',
-            version: '0.0.1',
-            description: 'API de exemplo para integração com a AWS',
-        }
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'API AWS',
+      version: '0.0.1',
+      description: 'API de exemplo para integração com a AWS',
     },
-    apis: ['./server.js'],
+    servers: [
+      {
+        url: 'http://localhost:3000', // ou sua URL pública
+      },
+    ],
+  },
+  apis: [path.join(__dirname, 'server.js')], // caminho absoluto para o server.js
 };
 
 const swaggerSpec = swaggerJSDoc(options);
 
 const swaggerDocs = (app) => {
-    app.use('/swagger', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-    console.log('Swagger rodando em: http://localhost:3000/swagger');
+  app.use('/swagger', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+  console.log('Swagger rodando em: http://localhost:3000/swagger');
 };
 
 module.exports = swaggerDocs;
